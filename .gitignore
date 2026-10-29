@@ -22,3 +22,5 @@ dist-ssr/
 # logs
 *.local
 npm-debug.log*
+.bin/
+agent/agent.json

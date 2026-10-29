@@ -56,6 +56,7 @@ log('Папка спостереження:', watchDir);
 // ------------------------------------------------------------------- стан
 let currentFile = null;
 const registry = new Map(); // versionId → { path, size }
+let lastPublicUrl = null; // базовий URL поточного тунеля
 
 // ------------------------------------------------------- HTTP Range-сервер
 function parseRange(header, size) {
@@ -159,22 +160,38 @@ async function ensureCloudflared() {
   return dst;
 }
 
-async function startTunnel() {
+async function startTunnelAttempt() {
   const bin = await ensureCloudflared();
   const child = spawn(bin, ['tunnel', '--url', `http://127.0.0.1:${PORT}`, '--no-autoupdate'], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const publicUrl = await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Тунель не піднявся за 60 сек.')), 60_000);
+    const timer = setTimeout(() => reject(new Error('Тунель не піднявся за 90 сек.')), 90_000);
     const handle = (buf) => {
-      const m = buf.toString().match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
-      if (m) { clearTimeout(timer); resolve(m[0]); }
+      // виключаємо службові (api.trycloudflare.com — endpoint реєстрації)
+      const m = buf.toString().match(/https:\/\/(?!api\.)[a-z0-9-]+\.trycloudflare\.com/g);
+      if (m && m.length > 0) { clearTimeout(timer); resolve(m[m.length - 1]); }
     };
     child.stdout.on('data', handle);
     child.stderr.on('data', handle);
     child.on('exit', (code) => { clearTimeout(timer); reject(new Error(`cloudflared завершився (code ${code})`)); });
   });
   return { child, publicUrl };
+}
+
+const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function startTunnelWithRetry(maxAttempts = 30) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      log(`Тунель: спроба ${attempt}/${maxAttempts}…`);
+      return await startTunnelAttempt();
+    } catch (e) {
+      log(`Тунель не вдався: ${e.message}`);
+      if (attempt < maxAttempts) await delay(2_000);
+    }
+  }
+  throw new Error('Тунель не піднявся після всіх спроб. Перевірте інтернет або `brew install cloudflared`.');
 }
 
 // ------------------------------------------------------------------- announce
@@ -184,10 +201,16 @@ async function announce(publicUrl) {
     return null;
   }
   const st = fs.statSync(currentFile);
+  const headers = { 'Content-Type': 'application/json' };
+  if (cfg.publicKey) {
+    // publishable key — публічне значення; платформа вимагає валідний JWT
+    headers.Authorization = `Bearer ${cfg.publicKey}`;
+    headers.apikey = cfg.publicKey;
+  }
   try {
     const res = await fetch(`${cfg.apiUrl.replace(/\/+$/, '')}/functions/v1/agent-announce`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         token: cfg.agentToken,
         url: publicUrl,
@@ -237,17 +260,47 @@ function watchFolder() {
     if (next && next !== currentFile) {
       currentFile = next;
       log('Поточний файл →', path.basename(next));
-      if (wasTunnelReady()) { void announce(lastPublicUrlRef()); }
+      if (lastPublicUrl) {
+        void announce(lastPublicUrl);
+      }
     }
   };
   check();
   setInterval(check, 5_000);
 }
+let heartbeatTimer = null;
 
-// ------------------------------------------------------------------- main
-let lastPublicUrl = null;
-function lastPublicUrlRef() { return lastPublicUrl; }
-function wasTunnelReady() { return lastPublicUrl != null; }
+async function runTunnelLoop() {
+  for (;;) {
+    try {
+      const { child, publicUrl } = await startTunnelWithRetry();
+      lastPublicUrl = publicUrl;
+      log('');
+      log('ПУБЛІЧНИЙ URL ТУНЕЛЯ:', publicUrl);
+      log('(змінюється між перезапусками агенту — це нормально, адмінка отримує його сама)');
+      log('');
+      await announce(publicUrl);
+      if (!heartbeatTimer) {
+        heartbeatTimer = setInterval(() => void announce(publicUrl), HEARTBEAT_MS);
+      } else {
+        // оновлюємо підхоплений URL у heartbeat без створення другого таймер-циклу
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = setInterval(() => void announce(publicUrl), HEARTBEAT_MS);
+      }
+      await new Promise((resolve) => {
+        child.on('exit', (code) => {
+          log(`cloudflared завершився (code ${code}) — перезапускаю тунель…`);
+          resolve();
+        });
+      });
+      await delay(3_000);
+    } catch (e) {
+      log('Цикл тунеля:', e.message);
+      log('Повторно за 15 с…');
+      await delay(15_000);
+    }
+  }
+}
 
 process.on('SIGINT', () => {
   log('\nЗупиняю агент і тунель…');
@@ -258,12 +311,4 @@ process.on('SIGINT', () => {
 await startServer();
 log(`Локальний сервер: http://127.0.0.1:${PORT}`);
 watchFolder();
-const { child, publicUrl } = await startTunnel();
-lastPublicUrl = publicUrl;
-log('');
-log('ПУБЛІЧНИЙ URL ТУНЕЛЯ:', publicUrl);
-log('(змінюється між перезапусками агенту — це нормально, адмінка отримує його сама)');
-log('');
-void announce(publicUrl);
-setInterval(() => void announce(publicUrl), HEARTBEAT_MS);
-child.on('exit', () => process.exit(1));
+await runTunnelLoop();

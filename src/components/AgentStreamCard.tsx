@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { adminApi } from '../db';
-import { SUPABASE_URL } from '../lib/config';
+import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY as PUBLISHABLE_KEY } from '../lib/config';
 import { isMockMode } from '../lib/config';
 import { isAgentOnline } from '../lib/stream';
 import type { VersionInfo } from '../lib/types';
@@ -61,7 +61,7 @@ export default function AgentStreamCard({ projectId, versions }: { projectId: st
 
   function downloadAgentConfig() {
     const config = JSON.stringify(
-      { projectId, agentToken: freshToken ?? '', apiUrl: SUPABASE_URL, watchDir: '/ЗМІНІТЬ_НА/Шлях/До/DaVinci_Export' },
+      { projectId, agentToken: freshToken ?? '', apiUrl: SUPABASE_URL, publicKey: PUBLISHABLE_KEY, watchDir: '/ЗМІНІТЬ_НА/Шлях/До/DaVinci_Export' },
       null,
       2,
     );
