@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { adminApi } from '../db';
-import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY as PUBLISHABLE_KEY } from '../lib/config';
+import { SUPABASE_URL } from '../lib/config';
 import { isMockMode } from '../lib/config';
 import { isAgentOnline } from '../lib/stream';
 import type { VersionInfo } from '../lib/types';
@@ -11,6 +11,8 @@ import ConfirmModal from './ConfirmModal';
  * завантаження agent.json і команди для запуску локального агенту.
  * Відео НЕ завантажується у сховище — гість дивиться файл із вашого Mac.
  */
+const GITHUB_RAW = 'https://raw.githubusercontent.com/yumediawork-stack/video-review/main/agent';
+
 export default function AgentStreamCard({ projectId, versions }: { projectId: string; versions: VersionInfo[] }) {
   const [active, setActive] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -18,6 +20,14 @@ export default function AgentStreamCard({ projectId, versions }: { projectId: st
   const [error, setError] = useState<string | null>(null);
   const [freshToken, setFreshToken] = useState<string | null>(null);
   const [showRevoke, setShowRevoke] = useState(false);
+
+  // Команди підключення показуються одразу після активації (токен вписано).
+  const cmdWindows = freshToken
+    ? `& ([scriptblock]::Create((irm '${GITHUB_RAW}/agent-boot.ps1'))) '${SUPABASE_URL}' '${freshToken}' -Watch 'D:\\DaVinci Exports'`
+    : '';
+  const cmdMac = freshToken
+    ? `curl -fsSL '${GITHUB_RAW}/agent-boot.sh' | bash -s -- '${SUPABASE_URL}' '${freshToken}' '~/Movies/DaVinci Exports'`
+    : '';
 
   useEffect(() => {
     adminApi
@@ -57,20 +67,6 @@ export default function AgentStreamCard({ projectId, versions }: { projectId: st
     } finally {
       setBusy(false);
     }
-  }
-
-  function downloadAgentConfig() {
-    const config = JSON.stringify(
-      { projectId, agentToken: freshToken ?? '', apiUrl: SUPABASE_URL, publicKey: PUBLISHABLE_KEY, watchDir: '/ЗМІНІТЬ_НА/Шлях/До/DaVinci_Export' },
-      null,
-      2,
-    );
-    const blob = new Blob([config], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'agent.json';
-    a.click();
-    URL.revokeObjectURL(a.href);
   }
 
   return (
@@ -114,46 +110,45 @@ export default function AgentStreamCard({ projectId, versions }: { projectId: st
                 Відкликати агент-ключ
               </button>
               {freshToken && (
-                <span className="text-xs text-ink-warn">Ключ показано нижче — збережіть його зараз.</span>
+                <span className="text-xs text-ink-warn">Ключ уже вписано в команди нижче — копіюйте зараз.</span>
               )}
             </div>
           )}
 
           {freshToken && (
-            <div className="mt-3 flex flex-col gap-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <code className="flex-1 rounded bg-[#0F1218] px-2 py-1.5 font-mono text-xs text-ink-accent-strong break-all">
-                  {freshToken}
-                </code>
-                <button
-                  type="button"
-                  className="vr-btn"
-                  onClick={async () => {
-                    try { await navigator.clipboard.writeText(freshToken); } catch { /* ignore */ }
-                  }}
-                >
-                  Скопіювати ключ
-                </button>
-                <button type="button" className="vr-btn vr-btn-accent" onClick={downloadAgentConfig}>
-                  Завантажити agent.json
-                </button>
+            <div className="mt-3 flex flex-col gap-3">
+              <div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="vr-label mb-0">Windows (PowerShell)</span>
+                  <button
+                    type="button"
+                    className="vr-btn px-2 py-1 text-xs"
+                    onClick={async () => {
+                      try { await navigator.clipboard.writeText(cmdWindows); } catch { /* ignore */ }
+                    }}
+                  >
+                    Скопіювати команду
+                  </button>
+                </div>
+                <pre className="mt-1 overflow-x-auto rounded bg-[#0F1218] p-2 text-[11px] leading-relaxed text-ink-accent-strong">{cmdWindows}</pre>
               </div>
-              <p className="text-[11px] leading-relaxed text-ink-warn">
-                Токен показується лише один раз (в БД — лише хеш). Після перезавантаження
-                сторінки для нового ключа натисніть «Активувати агент» знову (старе відкликатиметься).
-              </p>
+
+              <details>
+                <summary className="cursor-pointer text-xs text-ink-muted hover:text-ink-text">macOS / Linux (bash)</summary>
+                <div className="mt-1">
+                  <pre className="overflow-x-auto rounded bg-[#0F1218] p-2 text-[11px] leading-relaxed text-ink-accent-strong">{cmdMac}</pre>
+                </div>
+              </details>
+
               <ol className="mt-1 list-decimal space-y-1 pl-5 text-xs text-ink-muted">
-                <li>Скачайте <code className="text-ink-text">agent.json</code> у теку <code className="text-ink-text">agent/</code> (поруч із agent.mjs).</li>
-                <li>
-                  Windows (PowerShell): <code className="text-ink-text">node agent.mjs .\agent.json "D:\Exports"</code>
-                  {' — '}macOS/Linux: <code className="text-ink-text">node agent.mjs ./agent.json "/шлях/до/папки"</code>
-                </li>
-                <li>
-                  Тунель: <code className="text-ink-text">cloudflared</code> завантажується агентом сам
-                  (вимагається лише <span className="text-ink-text">Node.js 20+</span>).
-                </li>
-                <li>Експорт нового MP4 у цю теку → агент створить чернетку → «Опублікувати цю версію».</li>
+                <li>На ПК з DaVinci вставте команду → Enter (щоразу т ж. сама на перший раз).</li>
+                <li>Агент сам скачає стабільну версію, підніме тунель підключиться до+self-прийде онлайн в адмінку.</li>
+                <li>Створеться ярлик «Video Review Agent» на робочому столі — наступні запуски одним Tclikом двойного.</li>
+                <li>Розмістіть те MP4 у вказану папку → агент створить чернетку → «Опублікувати цю версію».</li>
               </ol>
+              <p className="text-[11px] text-ink-muted">
+                Потрібен <span className="text-ink-text">Node.js 20+</span> на цьому ПК: https://nodejs.org
+              </p>
             </div>
           )}
         </>

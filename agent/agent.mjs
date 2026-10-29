@@ -25,33 +25,83 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const CONFIG_PATH = process.argv[2] && !process.argv[2].startsWith('--')
-  ? path.resolve(process.argv[2])
-  : path.join(HERE, 'agent.json');
-const WATCH_DIR = process.argv[3] ? path.resolve(process.argv[3]) : null;
 const PORT = 8787;
 const HEARTBEAT_MS = 60_000;
-const STABILITY_MS = 15_000; // файл, ченний останні 15 c, вважаємо дописаним
+const STABILITY_MS = 15_000; // файл, не чienий 15 с, вважаємо дописаним
+
+// ----------------------------------------------------------------- аргументи
+// Режим 1 (підключення з веб-інтерфейсу, одним рядком command):
+//   node agent.mjs --api <Supabase URL> --token <агент-токен> [--watch <папка>]
+// Режим 2 (старий/локальний): node agent.mjs [agent.json] [watchDir]
+function parseArgs() {
+  const a = process.argv.slice(2);
+  const out = { config: null, watch: null, api: null, token: null };
+  for (let i = 0; i < a.length; i++) {
+    const k = a[i];
+    const next = a[i + 1];
+    if (k === '--api') { out.api = next; i++; continue; }
+    if (k.startsWith('--api=')) { out.api = k.slice(6); continue; }
+    if (k === '--token') { out.token = next; i++; continue; }
+    if (k.startsWith('--token=')) { out.token = k.slice(8); continue; }
+    if (k === '--watch') { out.watch = next; i++; continue; }
+    if (k.startsWith('--watch=')) { out.watch = k.slice(8); continue; }
+    if (!k.startsWith('--') && out.config === null) { out.config = k; continue; }
+    if (!k.startsWith('--')) out.watch = k;
+  }
+  return out;
+}
+const argv = parseArgs();
+const CONFIG_PATH = argv.config ? path.resolve(argv.config) : path.join(HERE, 'agent.json');
 
 function log(...a) { console.log(new Date().toLocaleTimeString('uk-UA'), ...a); }
 
-if (!fs.existsSync(CONFIG_PATH)) {
-  console.error(`Файл конфігу не знайдено: ${CONFIG_PATH}`);
-  console.error('Скачайте agent.json з панелі адміна (розділ «Трансляція з PC») і запустіть: node agent.mjs ./agent.json "<папка>"');
-  process.exit(1);
+/**
+ * Режим 1: агент сам отримує конфіг за токеном (без файлів/клавіш).
+ * Зберігає agent.json для наступних запусків без аргументів.
+ */
+async function bootstrapConfig() {
+  if (!argv.api || !argv.token) {
+    console.error('Для підключення з веб-інтерфейсу вкажіть: --api <Supabase URL> --token <агент-токен>');
+    console.error('Готову команду копіюйте з адмінки → розділ «Трансляція з PC».');
+    process.exit(1);
+  }
+  const res = await fetch(`${argv.api.replace(/\/+$/, '')}/functions/v1/agent-bootstrap`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: argv.token }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    console.error(`Bootstrap не вдалися (${res.status}):`, j?.error?.message ?? '');
+    process.exit(1);
+  }
+  const cfg = {
+    projectId: j.projectId,
+    agentToken: argv.token,
+    apiUrl: j.apiUrl,
+    publicKey: j.publicKey,
+    watchDir: argv.watch,
+  };
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
+  log(`Конфіг збережено: ${CONFIG_PATH}`);
+  return cfg;
 }
-const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-if (!cfg.projectId || !cfg.agentToken || !cfg.apiUrl) {
-  console.error('agent.json має містити projectId, agentToken, apiUrl.');
-  process.exit(1);
+
+async function loadConfig() {
+  if (argv.token) return bootstrapConfig();
+  if (!fs.existsSync(CONFIG_PATH)) {
+    console.error(`Файл конфігу не знайдено: ${CONFIG_PATH}`);
+    console.error('Команду для підключення копіюйте з адмінки → розділ «Трансляція з PC».');
+    process.exit(1);
+  }
+  const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+  if (!cfg.projectId || !cfg.agentToken || !cfg.apiUrl) {
+    console.error('agent.json має містити projectId, agentToken, apiUrl.');
+    process.exit(1);
+  }
+  return cfg;
 }
-const watchDir = WATCH_DIR ?? (cfg.watchDir ? path.resolve(cfg.watchDir) : process.cwd());
-if (!fs.existsSync(watchDir)) {
-  console.error(`Папку спостереження не знайдено: ${watchDir}`);
-  process.exit(1);
-}
-log('Проєкт:', cfg.projectId);
-log('Папка спостереження:', watchDir);
 
 // ------------------------------------------------------------------- стан
 let currentFile = null;
@@ -321,14 +371,14 @@ function latestStableMp4(dir) {
   } catch { return null; }
   const newest = candidates[0];
   if (!newest) return null;
-  // файл, який_output ще дописується ( недавно змінений) — не беремо
+  // файл, який ще дописується (змінений хвилину тому) — не беремо
   if (Date.now() - newest.mtime < STABILITY_MS) return null;
   return newest.p;
 }
 
-function watchFolder() {
+function watchFolder(dir) {
   const check = () => {
-    const next = latestStableMp4(watchDir);
+    const next = latestStableMp4(dir);
     if (next && next !== currentFile) {
       currentFile = next;
       log('Поточний файл →', path.basename(next));
@@ -338,7 +388,7 @@ function watchFolder() {
     }
   };
   check();
-  setInterval(check, 5_000);
+  setInterval(() => check(), 5_000);
 }
 let heartbeatTimer = null;
 
@@ -380,7 +430,18 @@ process.on('SIGINT', () => {
   process.exit(0);
 });
 
+// ----------------------------------------------------------------- main
+const cfg = await loadConfig();
+const watchDir = argv.watch || cfg.watchDir ? path.resolve(argv.watch || cfg.watchDir) : null;
+if (!watchDir || !fs.existsSync(watchDir)) {
+  console.error(`Папку спостереження не знайдено: ${watchDir ?? '(не задано)'}`);
+  console.error('Вкажіть шлях до папки, куди DaVinci/скрипт складає MP4.');
+  process.exit(1);
+}
+log('Проєкт:', cfg.projectId);
+log('Папка спостереження:', watchDir);
+
 await startServer();
 log(`Локальний сервер: http://127.0.0.1:${PORT}`);
-watchFolder();
+watchFolder(watchDir);
 await runTunnelLoop();
