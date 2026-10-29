@@ -20,6 +20,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import readline from 'node:readline';
 import { spawn, execSync } from 'node:child_process';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -432,14 +433,35 @@ process.on('SIGINT', () => {
 
 // ----------------------------------------------------------------- main
 const cfg = await loadConfig();
-const watchDir = argv.watch || cfg.watchDir ? path.resolve(argv.watch || cfg.watchDir) : null;
+let watchDir = argv.watch || cfg.watchDir ? path.resolve(argv.watch || cfg.watchDir) : null;
+
+// Теку немає → пропонуємо створити тут же (одна клавіша замість ре-налаштування).
+if (watchDir && !fs.existsSync(watchDir) && process.stdin.isTTY) {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const ans = await rl.question(`Теки немає: ${watchDir}\nСтворити її зараз? [Enter = так / n = ні]: `);
+  rl.close();
+  if (ans.trim() === '' || /^(y|yes|д|так)$/i.test(ans.trim())) {
+    try {
+      fs.mkdirSync(watchDir, { recursive: true });
+      log('Теку створено:', watchDir);
+    } catch (e) {
+      console.error('Не вдалося створити теку:', e.message);
+    }
+  } else {
+    console.error('Ок — вкажіть існуючу теку, куди DaVinci складає MP4, і запустіть знову.');
+  }
+}
+if (watchDir && fs.existsSync(watchDir) && fs.statSync(watchDir).isFile()) {
+  console.error('Шлях вказує на файл, а не на теку:', watchDir);
+  process.exit(1);
+}
 if (!watchDir || !fs.existsSync(watchDir)) {
-  console.error(`Папку спостереження не знайдено: ${watchDir ?? '(не задано)'}`);
-  console.error('Вкажіть шлях до папки, куди DaVinci/скрипт складає MP4.');
+  console.error(`Теку спостереження не знайдено: ${watchDir ?? '(не задано)'}`);
+  console.error('Створіть теку або вкажіть шлях до неї — і запустіть знову.');
   process.exit(1);
 }
 log('Проєкт:', cfg.projectId);
-log('Папка спостереження:', watchDir);
+log('Теку спостереження:', watchDir);
 
 await startServer();
 log(`Локальний сервер: http://127.0.0.1:${PORT}`);
