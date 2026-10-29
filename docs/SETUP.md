@@ -64,7 +64,7 @@ supabase login
 supabase link --project-ref <PROJECT-REF>
 
 # CORS: перелік origin фронтенду (dev + production), через кому, без пробілів
-supabase secrets set ALLOWED_ORIGINS=http://localhost:5173,http://localhost:4173,https://username.gitlab.io
+supabase secrets set ALLOWED_ORIGINS=http://localhost:5173,http://localhost:4173,https://username.github.io
 
 # Pepper для хешування review-токенів (випадкові 32 байти)
 openssl rand -hex 32
@@ -110,8 +110,8 @@ VITE_BASE_PATH=/video-review/
 ```
 
 - `VITE_BASE_PATH` має збігатися з реальною адресою Pages:
-  - `https://username.gitlab.io/video-review/` (project site) → `/video-review/`;
-  - власний домен або user site `https://username.gitlab.io/` → `/`.
+  - `https://username.github.io/video-review/` (project site) → `/video-review/`;
+  - власний домен або user site `https://username.github.io/` → `/`.
 - НІКОЛИ не додавайте service_role ключ у `VITE_*` — він не для фронтенду.
 
 ## 8. GitLab: репозиторій, CI/CD, Pages
@@ -127,7 +127,7 @@ VITE_BASE_PATH=/video-review/
    `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_BASE_PATH`
    (Protected/Environment: production). У — `.gitlab-ci.yml` ці значення вже використані.
 4. [Ручна дія] Pipeline: build → artifacts `public/` → Pages має стати доступним на
-   `https://username.gitlab.io/video-review/`.
+   `https://username.github.io/video-review/`.
 5. [Ручна дія] Додайте цей origin до `ALLOWED_ORIGINS`, якщо ще не додали.
 6. [Ручна дія] Перевірте: `.../#/login` відкривається напряму (HashRouter не потребує
    серверних rewrites).

@@ -27,7 +27,7 @@ Review independently → Read/resolve timecoded comments*. Сервіс не з�
 - Frontend: React + TypeScript + Vite, Tailwind CSS, React Router (HashRouter)
 - DB/авторизація/сховище/функциї: Supabase (Postgres + RLS, Auth email/password,
   private Storage bucket, Edge Functions)
-- Деплой фронтенду: GitLab CI/CD → GitLab Pages
+- Деплой фронтенду: GitHub Actions → GitHub Pages
 - Тести: Vitest (unit)
 
 ## Швидкий старт (mock-режим, без Supabase)
@@ -57,7 +57,7 @@ npm run dev
    `insert into public.admin_users (id) values ('<uid>');`.
 3. Задайте секрети функцій:
    ```bash
-   supabase secrets set ALLOWED_ORIGINS=http://localhost:5173,https://<user>.gitlab.io
+   supabase secrets set ALLOWED_ORIGINS=http://localhost:5173,https://username.github.io
    supabase secrets set REVIEW_TOKEN_PEPPER=<random_32_byte>
    ```
 4. Задеплойте Edge Functions:
@@ -73,12 +73,12 @@ npm run dev
    VITE_SUPABASE_PUBLISHABLE_KEY=<anon|publishable>
    VITE_BASE_PATH=/video-review/   # або /, якщо Pages на власному домені
    ```
-6. Push у GitLab → pipeline (`.gitlab-ci.yml`) опублікує static на GitLab Pages.
+6. Push у GitHub → workflow (`.github/workflows/deploy.yml`) опублікує build на GitHub Pages.
 
 **Публічний/anon ключ фронтенду — НЕ секрет**: всі чутливі дії захищені RLS,
 Edge Functions (гість не має прямого доступу до таблиць) та service_role,
 який живе лише у функціях. `SUPABASE_SERVICE_ROLE_KEY` ніколи не має
-потрапити у `VITE_*` змінні або у bundle GitLab Pages.
+потрапити у `VITE_*` змінні або у bundle Pages.
 
 ## Формат відео (MVP)
 
@@ -112,7 +112,7 @@ video-review/
 │   ├── migrations/       # SQL-схема + RLS + RPC
 │   └── functions/        # Edge Functions (review-read/comment/refresh/rotate)
 ├── docs/                 # SETUP / ARCHITECTURE / TEST_PLAN
-├── .gitlab-ci.yml        # build → GitLab Pages
+├── .github/workflows/deploy.yml  # build → GitHub Pages
 └── .env.example
 ```
 
