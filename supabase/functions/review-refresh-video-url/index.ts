@@ -6,7 +6,7 @@
  * коли старе спливає. Якщо версія вже змінилася — 409 (клієнт показує банер
  * «Доступна нова версія» замість тихого поновлення).
  */
-import { json, preflightResponse, resolveCors } from '../_shared/cors.ts';
+import { bindCors, json, preflightResponse, resolveCors } from '../_shared/cors.ts';
 import { serviceClient, type ReviewLinkJoined, type VersionRow } from '../_shared/db.ts';
 import { clientKey, rateLimit } from '../_shared/rate_limit.ts';
 import { hashToken, TOKEN_PATTERN } from '../_shared/tokens.ts';
@@ -26,11 +26,13 @@ function errorRes(status: number, code: string, message: string): Response {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     const cors = resolveCors(req);
+  bindCors(cors);
     if (!cors.allowed) return new Response(null, { status: 403 });
-    return preflightResponse();
+    return preflightResponse(cors.headers);
   }
   if (req.method !== 'POST') return errorRes(405, 'invalid_input', 'Метод не підтримується.');
   const cors = resolveCors(req);
+  bindCors(cors);
   if (!cors.allowed) return errorRes(403, 'cors_rejected', 'Origin не дозволено.');
 
   let raw: unknown;

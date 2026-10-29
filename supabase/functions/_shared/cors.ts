@@ -45,8 +45,18 @@ export function resolveCors(req: Request): Cors {
   return { headers: {}, allowed: false };
 }
 
-export function preflightResponse(): Response {
-  return new Response(null, { status: 204 });
+export function preflightResponse(headers: Record<string, string>): Response {
+  return new Response(null, { status: 204, headers });
+}
+
+/**
+ * Заголовки поточного запиту; приєднуються до КАЖДОЇ відповіді (не тільки
+ * preflight) — інакше браузер не зуміє прочитати відповідь на preflighted-запит.
+ */
+let current: Record<string, string> = {};
+
+export function bindCors(c: Cors): void {
+  current = c.headers;
 }
 
 export function json(status: number, body: unknown, extraHeaders: Record<string, string> = {}): Response {
@@ -55,6 +65,7 @@ export function json(status: number, body: unknown, extraHeaders: Record<string,
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store',
+      ...current,
       ...extraHeaders,
     },
   });

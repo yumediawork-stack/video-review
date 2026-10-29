@@ -7,7 +7,7 @@
  * РІВНО ОДИН РАЗ. Відновити токен із хешу неможливо — для нового копіювання
  * треба робити нове посилання (UX в адмінці це пояснює).
  */
-import { json, preflightResponse, resolveCors } from '../_shared/cors.ts';
+import { bindCors, json, preflightResponse, resolveCors } from '../_shared/cors.ts';
 import { serviceClient } from '../_shared/db.ts';
 import { generateToken, hashToken } from '../_shared/tokens.ts';
 import { z } from 'https://esm.sh/zod@3';
@@ -24,11 +24,13 @@ function errorRes(status: number, code: string, message: string): Response {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     const cors = resolveCors(req);
+  bindCors(cors);
     if (!cors.allowed) return new Response(null, { status: 403 });
-    return preflightResponse();
+    return preflightResponse(cors.headers);
   }
   if (req.method !== 'POST') return errorRes(405, 'invalid_input', 'Метод не підтримується.');
   const cors = resolveCors(req);
+  bindCors(cors);
   if (!cors.allowed) return errorRes(403, 'cors_rejected', 'Origin не дозволено.');
 
   const authHeader = req.headers.get('authorization') ?? '';
