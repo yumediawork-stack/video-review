@@ -96,12 +96,19 @@ async function loadConfig() {
     console.error('Команду для підключення копіюйте з адмінки → розділ «Трансляція з PC».');
     process.exit(1);
   }
-  const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+  const cfg = readJson(CONFIG_PATH);
   if (!cfg.projectId || !cfg.agentToken || !cfg.apiUrl) {
     console.error('agent.json має містити projectId, agentToken, apiUrl.');
     process.exit(1);
   }
   return cfg;
+}
+
+/** JSON із терпимістю до BOM (Windows Set-Content UTF8 додає BOM). */
+function readJson(file) {
+  const raw = fs.readFileSync(file, 'utf8');
+  const clean = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw;
+  return JSON.parse(clean);
 }
 
 // ------------------------------------------------------------------- стан
