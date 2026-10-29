@@ -129,54 +129,126 @@ function startServer() {
 }
 
 // ------------------------------------------------------------------- тунель
+/**
+ * Визначає файл для завантаження з Cloudflare releases:
+ *  win32 → cloudflared-windows-amd64.exe (звичайний exe, без tar)
+ *  darwin → cloudflared-darwin-arm64|amd64.tgz
+ *  linux → cloudflared-linux-amd64 (звичайний бінарник)
+ */
+function cloudflaredTarget(platform = process.platform, arch = os.arch()) {
+  if (platform === 'win32') {
+    return { asset: 'cloudflared-windows-amd64.exe', dstName: 'cloudflared.exe', kind: 'raw' };
+  }
+  if (platform === 'darwin') {
+    const a = arch === 'arm64' ? 'arm64' : 'amd64';
+    return { asset: `cloudflared-darwin-${a}.tgz`, dstName: 'cloudflared', kind: 'tgz' };
+  }
+  return { asset: 'cloudflared-linux-amd64', dstName: 'cloudflared', kind: 'raw' };
+}
+
 function findCloudflared() {
+  const { dstName } = cloudflaredTarget();
+  const binName = process.platform === 'win32' ? `${dstName}.exe` : dstName;
   const candidates = [
-    path.join(HERE, '.bin', 'cloudflared'),
-    '/opt/homebrew/bin/cloudflared',
-    '/usr/local/bin/cloudflared',
+    path.join(HERE, '.bin', binName),
+    ...(process.platform === 'win32'
+      ? [path.join(os.homedir(), 'Program Files (x86)', 'cloudflared', 'cloudflared.exe')]
+      : ['/opt/homebrew/bin/cloudflared', '/usr/local/bin/cloudflared']),
   ];
   return candidates.find((c) => fs.existsSync(c)) ?? null;
+}
+
+async function download(url, dst) {
+  const res = await fetch(url, { redirect: 'follow' });
+  if (!res.ok) throw new Error(`Завантаження ${url}: HTTP ${res.status}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  fs.writeFileSync(dst, buf);
+}
+
+async function extractTgz(tgz, dstDir) {
+  // tar є у Windows 10+ (bsdtar), macOS, Linux
+  execSync(`tar -xzf "${tgz}" -C "${dstDir}"`, { stdio: 'inherit', windowsHide: true });
 }
 
 async function ensureCloudflared() {
   const found = findCloudflared();
   if (found) return found;
-  if (process.platform !== 'darwin') {
-    throw new Error('Не знайдено cloudflared. Встановіть (brew install cloudflared) і перезапустіть.');
+  if (!['win32', 'darwin', 'linux'].includes(process.platform)) {
+    throw new Error('Не знайдено cloudflared. Встановіть його (brew install cloudflared / winget install Cloudflare.cloudflared) і перезапустіть.');
   }
-  const arch = os.arch() === 'arm64' ? 'arm64' : 'amd64';
+  const { asset, dstName, kind } = cloudflaredTarget();
   const dstDir = path.join(HERE, '.bin');
   fs.mkdirSync(dstDir, { recursive: true });
-  const url = `https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-${arch}.tgz`;
-  const tgz = path.join(dstDir, 'cloudflared.tgz');
-  log('Завантажую cloudflared (одноразово, ~25 МБ)…');
-  execSync(`curl -sL --fail -o "${tgz}" "${url}"`, { stdio: 'inherit' });
-  execSync(`tar -xzf "${tgz}" -C "${dstDir}"`, { stdio: 'inherit' });
-  fs.unlinkSync(tgz);
-  const dst = path.join(dstDir, 'cloudflared');
-  fs.chmodSync(dst, 0o755);
-  try { execSync(`xattr -d com.apple.quarantine "${dst}"`, { stdio: 'ignore' }); } catch { /* не критично */ }
+  const url = `https://github.com/cloudflare/cloudflared/releases/latest/download/${asset}`;
+  const tmp = path.join(dstDir, asset.replace('.tgz', '.download'));
+  const dst = path.join(dstDir, dstName);
+  log(`Завантажую cloudflared ${asset} (одноразово, ~25 МБ)…`);
+  await download(url, tmp);
+  if (kind === 'tgz') {
+    await extractTgz(tmp, dstDir);
+    fs.rmSync(tmp, { force: true });
+  } else if (tmp !== dst) {
+    fs.renameSync(tmp, dst);
+  }
+  if (process.platform !== 'win32') fs.chmodSync(dst, 0o755);
+  try {
+    if (process.platform !== 'win32') execSync(`xattr -d com.apple.quarantine "${dst}"`, { stdio: 'ignore' });
+  } catch { /* не критично */ }
   log('Готово:', dst);
   return dst;
 }
 
+/** Node fetch здатен церпіти повільну мережу (наш шлях до CF API ~25-36 c). */
+async function registerQuickTunnel() {
+  let lastErr = null;
+  for (let i = 0; i < 4; i++) {
+    try {
+      const res = await fetch('https://api.trycloudflare.com/tunnel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+        signal: AbortSignal.timeout(90_000),
+      });
+      const j = await res.json().catch(() => null);
+      if (j && j.success && j.result?.id && j.result?.hostname) {
+        const b64 = Buffer.from(JSON.stringify({ a: j.result.account_tag, t: j.result.id, s: j.result.secret })).toString('base64');
+        return { token: b64, hostname: j.result.hostname };
+      }
+      lastErr = new Error('API не дав tunnel-дані: ' + JSON.stringify(j?.errors ?? '').slice(0, 120));
+    } catch (e) {
+      lastErr = e;
+      log(`Реєстрація тунеля (${i + 1}/4) не вдалася: ${e.message} → ще раз…`);
+    }
+    await delay(2_000);
+  }
+  throw lastErr ?? new Error('Реєстрація тунеля не вдалася.');
+}
+
 async function startTunnelAttempt() {
   const bin = await ensureCloudflared();
-  const child = spawn(bin, ['tunnel', '--url', `http://127.0.0.1:${PORT}`, '--no-autoupdate'], {
+  const reg = await registerQuickTunnel();
+  const child = spawn(bin, ['tunnel', 'run', '--token', reg.token, '--url', `http://127.0.0.1:${PORT}`], {
     stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
   });
-  const publicUrl = await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Тунель не піднявся за 90 сек.')), 90_000);
+  // URL відомий із реєстрації; чекаємо ≥2 «Registered tunnel connection»
+  await new Promise((resolve, reject) => {
+    let seen = 0;
+    const timer = setTimeout(() => {
+      try { child.kill('SIGKILL'); } catch { /* ignore */ }
+      reject(new Error('cloudflared не підключився за 45 с.'));
+    }, 45_000);
     const handle = (buf) => {
-      // виключаємо службові (api.trycloudflare.com — endpoint реєстрації)
-      const m = buf.toString().match(/https:\/\/(?!api\.)[a-z0-9-]+\.trycloudflare\.com/g);
-      if (m && m.length > 0) { clearTimeout(timer); resolve(m[m.length - 1]); }
+      if (String(buf).includes('Registered tunnel connection')) {
+        seen += 1;
+        if (seen >= 2) { clearTimeout(timer); resolve(); }
+      }
     };
     child.stdout.on('data', handle);
     child.stderr.on('data', handle);
     child.on('exit', (code) => { clearTimeout(timer); reject(new Error(`cloudflared завершився (code ${code})`)); });
   });
-  return { child, publicUrl };
+  return { child, publicUrl: `https://${reg.hostname}` };
 }
 
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));

@@ -143,15 +143,16 @@ export default function AgentStreamCard({ projectId, versions }: { projectId: st
                 сторінки для нового ключа натисніть «Активувати агент» знову (старе відкликатиметься).
               </p>
               <ol className="mt-1 list-decimal space-y-1 pl-5 text-xs text-ink-muted">
-                <li>Скачайте <code className="text-ink-text">agent.json</code> у теку <code className="text-ink-text">agent/</code> розділу.</li>
+                <li>Скачайте <code className="text-ink-text">agent.json</code> у теку <code className="text-ink-text">agent/</code> (поруч із agent.mjs).</li>
                 <li>
-                  Запуск: <code className="text-ink-text">node agent.mjs ./agent.json "/шлях/до/папки з MP4"</code>
+                  Windows (PowerShell): <code className="text-ink-text">node agent.mjs .\agent.json "D:\Exports"</code>
+                  {' — '}macOS/Linux: <code className="text-ink-text">node agent.mjs ./agent.json "/шлях/до/папки"</code>
                 </li>
                 <li>
-                  Тунель: якщо немає <code className="text-ink-text">cloudflared</code> — агент сам його завантажить
-                  (чи <code className="text-ink-text">brew install cloudflared</code>).
+                  Тунель: <code className="text-ink-text">cloudflared</code> завантажується агентом сам
+                  (вимагається лише <span className="text-ink-text">Node.js 20+</span>).
                 </li>
-                <li>Експортували новий файл у цю теку → агент створить чернетку, натисніть «Опублікувати цю версію».</li>
+                <li>Експорт нового MP4 у цю теку → агент створить чернетку → «Опублікувати цю версію».</li>
               </ol>
             </div>
           )}
