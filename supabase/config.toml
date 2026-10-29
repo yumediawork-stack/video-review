@@ -1,0 +1,29 @@
+# Supabase local config (мінімальний). При `supabase start` / `supabase functions serve`.
+project_id = "video-review"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage"]
+
+[db]
+port = 54322
+
+[studio]
+enabled = true
+
+# Authorization: функції валідують токени самі (review-link) або JWT адміна
+# (rotate-review-link). Фронтенд завжди надсилає Authorization Bearer (anon-ключ
+# від гостьових функцій, access_token адміна для rotate), тому
+# дефолтний verify_jwt залишається увімкненим.
+[functions.review-read]
+verify_jwt = true
+
+[functions.review-comment]
+verify_jwt = true
+
+[functions.review-refresh-video-url]
+verify_jwt = true
+
+[functions.rotate-review-link]
+verify_jwt = true

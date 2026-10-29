@@ -1,0 +1,87 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  @apply bg-ink-bg text-ink-text font-sans antialiased;
+}
+
+* {
+  @apply border-ink-line;
+}
+
+input,
+textarea,
+select,
+button {
+  @apply outline-none;
+}
+
+::selection {
+  background: rgba(108, 140, 255, 0.35);
+}
+
+/* скролбар у панелях */
+.scroll-panel {
+  scrollbar-width: thin;
+  scrollbar-color: #2a2f3b transparent;
+}
+.scroll-panel::-webkit-scrollbar {
+  width: 8px;
+}
+.scroll-panel::-webkit-scrollbar-thumb {
+  background: #2a2f3b;
+  border-radius: 4px;
+}
+
+:focus-visible {
+  @apply ring-2 ring-ink-accent ring-offset-1 ring-offset-ink-bg;
+}
+
+.vr-card {
+  @apply rounded-card border border-ink-line bg-ink-surface;
+}
+
+.vr-btn {
+  @apply inline-flex select-none items-center justify-center gap-1.5 rounded-lg border border-ink-line bg-ink-raised px-3 py-2 text-sm font-medium text-ink-text transition-colors
+    hover:bg-ink-line/60 disabled:cursor-not-allowed disabled:opacity-40;
+}
+
+.vr-btn-accent {
+  @apply border-[#4C63C4] bg-ink-accent text-white hover:bg-ink-accent-strong;
+}
+
+.vr-btn-danger {
+  @apply border-[#7F2D2D] bg-transparent text-ink-danger hover:bg-[#3A222A];
+}
+
+.vr-input {
+  @apply w-full rounded-lg border border-ink-line bg-[#0F1218] px-3 py-2 text-sm text-ink-text placeholder:text-ink-muted/60 focus:border-ink-accent;
+}
+
+.vr-label {
+  @apply mb-1 block text-xs font-medium text-ink-muted;
+}
+
+.vr-chip {
+  @apply inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium;
+}
+
+@keyframes vr-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.vr-spinner {
+  animation: vr-spin 0.9s linear infinite;
+}
