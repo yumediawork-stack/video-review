@@ -120,12 +120,12 @@ VITE_BASE_PATH=/video-review/
 2. [Ручна дія] Push у default гілку (`main`):
    ```bash
    git init && git add -A && git commit -m "MVP"
-   git remote add origin git@gitlab.com:username/video-review.git
+   git remote add origin https://github.com/username/video-review.git
    git push -u origin main
    ```
 3. [Ручна дія] Settings → CI/CD → Variables: додайте
    `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_BASE_PATH`
-   (Protected/Environment: production). У — `.gitlab-ci.yml` ці значення вже використані.
+   (Secrets/Variables). U  ці значення використані через secrets/vars.
 4. [Ручна дія] Pipeline: build → artifacts `public/` → Pages має стати доступним на
    `https://username.github.io/video-review/`.
 5. [Ручна дія] Додайте цей origin до `ALLOWED_ORIGINS`, якщо ще не додали.
@@ -143,7 +143,7 @@ VITE_BASE_PATH=/video-review/
 ## 10. Обмеження і квоти (перевіряйте за актуальними тарифами)
 
 - Supabase: обсяг storage, трафік, максимальний розмір загрузки, виклики функцій → <https://supabase.com/pricing>
-- GitLab Pages: розмір артифакта pages, трафік → <https://docs.gitlab.com/user/project/pages/>
+- GitHub Pages: квоти безкоштовного plan → <https://docs.github.com/en/pages/getting-started-with-github-pages>
 - Жодних «зашитих» припущень «максимум 1 ГБ»: адмін сам визначає обмеження плану.
 - При вичерпанні квот розгляньте S3-сумісне сховище (R2/B2): заміна ізольована у
   Edge Functions (`createSignedUrl`) та шляхах збереження.
