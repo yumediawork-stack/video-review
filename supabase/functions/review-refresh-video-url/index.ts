@@ -67,12 +67,22 @@ Deno.serve(async (req) => {
 
   const { data: version } = await service
     .from('video_versions')
-    .select('id, storage_path, upload_status')
+    .select('id, storage_path, upload_status, media_source, agent_url, agent_updated_at')
     .eq('id', versionId)
     .maybeSingle();
-  const vrow = version as unknown as VersionRow | null;
+  const vrow = version as unknown as (VersionRow & { media_source: 'storage' | 'agent'; agent_url: string | null; agent_updated_at: string | null }) | null;
   if (!vrow || vrow.upload_status !== 'ready') {
     return errorRes(404, 'no_published_version', 'Відео ще не опубліковано.');
+  }
+
+  if (vrow.media_source === 'agent') {
+    const base = (vrow.agent_url ?? '').replace(/\/+$/, '');
+    if (!base) return errorRes(404, 'no_published_version', 'Джерело трансляції не налаштоване.');
+    const heartbeat = vrow.agent_updated_at ? new Date(vrow.agent_updated_at).getTime() : 0;
+    if (Date.now() - heartbeat > 120_000) {
+      return errorRes(503, 'stream_offline', 'Монтажер зараз офлайн. Спробуйте пізніше.');
+    }
+    return json(200, { signedUrl: `${base}/v/${vrow.id}.mp4`, expiresAt: null, kind: 'agent' });
   }
 
   const { data: signed, error: signedErr } = await service
@@ -87,5 +97,6 @@ Deno.serve(async (req) => {
   return json(200, {
     signedUrl: signed.signedUrl,
     expiresAt: new Date(Date.now() + SIGNED_URL_TTL * 1000).toISOString(),
+    kind: 'storage',
   });
 });

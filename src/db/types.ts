@@ -34,6 +34,11 @@ export interface AdminDataApi {
   createOrRotateReviewLink(projectId: string): Promise<string>; // raw token, повертається лише один раз
   revokeReviewLinks(projectId: string): Promise<void>;
 
+  /** Агент-трансляція: ключ для локального агента (hash-only на сервері). */
+  getAgentState(projectId: string): Promise<{ active: boolean }>;
+  createAgentKey(projectId: string): Promise<string>; // raw token один раз
+  revokeAgentKey(projectId: string): Promise<void>;
+
   /** Коментарі (адмін, під RLS) */
   listAdminComments(projectId: string, versionId: string): Promise<FlatComment[]>;
   addAdminComment(

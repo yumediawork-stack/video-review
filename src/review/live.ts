@@ -58,7 +58,7 @@ function localizedMessage(code: string, status: number): string {
 interface ReadPayload {
   project: { title: string; description: string | null };
   version: { id: string; number: number; durationSeconds: number | null };
-  video: { signedUrl: string; expiresAt: string | null };
+  video: { signedUrl: string; expiresAt: string | null; kind?: 'storage' | 'agent'; offline?: boolean };
   comments: FlatCommentLike[];
   revision: string;
 }
@@ -70,7 +70,12 @@ export const liveReviewApi: ReviewApi = {
       projectTitle: data.project.title,
       projectDescription: data.project.description,
       version: data.version,
-      video: { url: data.video.signedUrl, expiresAt: data.video.expiresAt ?? null },
+      video: {
+        url: data.video.signedUrl,
+        expiresAt: data.video.expiresAt ?? null,
+        kind: data.video.kind === 'agent' ? 'agent' : 'storage',
+        offline: data.video.offline === true,
+      },
       comments: data.comments ?? [],
       revision: data.revision,
     };

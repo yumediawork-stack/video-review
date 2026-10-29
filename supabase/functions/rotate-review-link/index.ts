@@ -1,11 +1,12 @@
 /**
  * POST /functions/v1/rotate-review-link  (адмінська дія, JWT admin)
- * Body: { projectId, action: 'create' | 'revoke' }
+ * Body: { projectId, action: 'create' | 'revoke', kind: 'review' | 'agent' = 'review' }
  *
- * Створює новий review-токен (криптографічно випадковий), зберігає ЛИШЕ хеш,
- * відкликає попередні активні посилання проєкту і ПОВЕРТАЄ raw токен
- * РІВНО ОДИН РАЗ. Відновити токен із хешу неможливо — для нового копіювання
- * треба робити нове посилання (UX в адмінці це пояснює).
+ * kind='review' → гостьові review-посилання (review_links).
+ * kind='agent'  → ключі локального агента-стрімера (agent_links):
+ *   агент конфігурується raw-токеном один раз; announce через agent-announce.
+ *
+ * Зберігається ЛИШЕ hash; raw повертається РІВНО ОДИН РАЗ.
  */
 import { bindCors, json, preflightResponse, resolveCors } from '../_shared/cors.ts';
 import { serviceClient } from '../_shared/db.ts';
@@ -15,6 +16,7 @@ import { z } from 'https://esm.sh/zod@3';
 const bodySchema = z.object({
   projectId: z.string().uuid(),
   action: z.union([z.literal('create'), z.literal('revoke')]),
+  kind: z.union([z.literal('review'), z.literal('agent')]).default('review'),
 });
 
 function errorRes(status: number, code: string, message: string): Response {
@@ -45,7 +47,7 @@ Deno.serve(async (req) => {
   }
   const parsed = bodySchema.safeParse(raw);
   if (!parsed.success) return errorRes(400, 'invalid_input', 'Некоректний формат запиту.');
-  const { projectId, action } = parsed.data;
+  const { projectId, action, kind } = parsed.data;
 
   const service = serviceClient();
 
@@ -69,7 +71,19 @@ Deno.serve(async (req) => {
   }
 
   if (action === 'revoke') {
-    // відкликаємо всі досі активні посилання проєкту
+    if (kind === 'agent') {
+      const { error } = await service
+        .from('agent_links')
+        .update({ is_active: false, revoked_at: new Date().toISOString() })
+        .eq('project_id', projectId)
+        .eq('is_active', true);
+      if (error) {
+        console.error('agent revoke error', error.message);
+        return errorRes(500, 'internal_error', 'Не вдалося відкликати агент-ключ.');
+      }
+      return json(200, { ok: true });
+    }
+    // kind === 'review': відкликаємо всі досі активні посилання проєкту
     const { error: revokeErr } = await service
       .from('review_links')
       .update({ is_active: false, revoked_at: new Date().toISOString() })
@@ -85,8 +99,25 @@ Deno.serve(async (req) => {
   // action === 'create' → ротація
   const token = generateToken();
   const tokenHash = await hashToken(token);
-
   const now = new Date().toISOString();
+
+  if (kind === 'agent') {
+    const { error: rotErr } = await service
+      .from('agent_links')
+      .update({ is_active: false, revoked_at: now })
+      .eq('project_id', projectId)
+      .eq('is_active', true);
+    if (rotErr) console.error('agent rotate deactivate error', rotErr.message);
+    const { error: insertErr } = await service
+      .from('agent_links')
+      .insert({ project_id: projectId, token_hash: tokenHash, is_active: true });
+    if (insertErr) {
+      console.error('agent link insert error', insertErr.message);
+      return errorRes(500, 'internal_error', 'Не вдалося створити агент-ключ.');
+    }
+    return json(200, { token, note: 'Агент-токен показується один раз. У БД збережено лише хеш.' });
+  }
+
   const { error: rotErr } = await service
     .from('review_links')
     .update({ is_active: false, revoked_at: now })

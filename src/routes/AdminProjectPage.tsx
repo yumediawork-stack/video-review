@@ -7,6 +7,7 @@ import CommentList from '../components/CommentList';
 import CommentComposer from '../components/CommentComposer';
 import VersionSelector from '../components/VersionSelector';
 import UploadVideo from '../components/UploadVideo';
+import AgentStreamCard from '../components/AgentStreamCard';
 import VideoPlayer, { type VideoPlayerHandle } from '../components/VideoPlayer';
 import { buildCommentTree, countOpenComments, sortRootComments } from '../lib/comments';
 import { buildReviewUrl } from '../lib/config';
@@ -396,6 +397,8 @@ export default function AdminProjectPage() {
           </section>
 
           <UploadVideo projectId={projectId} createVersionDraft={adminApi.createVersionDraft.bind(adminApi)} onCompleted={() => void reloadAll(selectedVersionId ?? undefined)} />
+
+          <AgentStreamCard projectId={projectId} versions={versions} />
 
           {/* Публікація */}
           {selected && (

@@ -34,6 +34,7 @@ export default function ReviewPage() {
   const [busy, setBusy] = useState(false);
   const [composerError, setComposerError] = useState<string | null>(null);
   const [versionChanged, setVersionChanged] = useState(false);
+  const [streamOffline, setStreamOffline] = useState(false);
 
   const playerRef = useRef<VideoPlayerHandle | null>(null);
   const revisionRef = useRef('');
@@ -46,7 +47,8 @@ export default function ReviewPage() {
       if (id !== fetchIdRef.current) return;
       setData(access);
       setComments(access.comments);
-      setVideoSrc(access.video.url);
+      setVideoSrc(access.video.offline ? null : access.video.url);
+      setStreamOffline(access.video.offline === true);
       revisionRef.current = access.revision;
       setScreen({ kind: 'ready' });
       setVersionChanged(false);
@@ -76,6 +78,8 @@ export default function ReviewPage() {
           if (access.revision !== revisionRef.current) {
             setNewerRevision(access.revision);
           }
+          setStreamOffline(access.video.offline === true);
+          if (access.video.offline) setVideoSrc(null);
         } catch {
           /* перегляд не рвемо; окремо спрацює помилка самого плеєра */
         }
@@ -199,22 +203,48 @@ export default function ReviewPage() {
           )}
 
           <div className="mt-4 grid items-start gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(300px,1fr)]">
-            <VideoPlayer
-              ref={playerRef}
-              src={videoSrc}
-              markers={roots.map((r) => ({ id: r.id, seconds: r.timestampSeconds, label: `${r.authorName}: ${r.body.slice(0, 60)}` }))}
-              pauseOnSeek={false}
-              onSourceError={async () => {
-                try {
-                  if (!data) return null;
-                  const res = await reviewApi.refreshVideoUrl(token, data.version.id);
-                  setVideoSrc(res.url);
-                  return res.url;
-                } catch {
-                  return null;
-                }
-              }}
-            />
+            {streamOffline || data.video.offline ? (
+              <section className="vr-card grid place-items-center gap-3 p-10 text-center" aria-label="Трансляція недоступна">
+                <div className="text-3xl" aria-hidden="true">📡</div>
+                <h2 className="text-base font-semibold">Монтажер зараз офлайн</h2>
+                <p className="max-w-sm text-sm text-ink-muted">
+                  Це live-трансляція з комп'ютера редактора — вона доступна, коли агент запущений
+                  і файл відкритий. Коментарі залишаються доступними — пишіть, автор побачить.
+                </p>
+                <button
+                  type="button"
+                  className="vr-btn vr-btn-accent"
+                  onClick={() => {
+                    setStreamOffline(false);
+                    void load(token);
+                  }}
+                >
+                  Спробувати знову
+                </button>
+              </section>
+            ) : (
+              <VideoPlayer
+                ref={playerRef}
+                src={videoSrc}
+                markers={roots.map((r) => ({ id: r.id, seconds: r.timestampSeconds, label: `${r.authorName}: ${r.body.slice(0, 60)}` }))}
+                pauseOnSeek={false}
+                onSourceError={async () => {
+                  try {
+                    if (!data) return null;
+                    const res = await reviewApi.refreshVideoUrl(token, data.version.id);
+                    setVideoSrc(res.url);
+                    setStreamOffline(false);
+                    return res.url;
+                  } catch (e) {
+                    if (e instanceof ApiError && e.code === 'stream_offline') {
+                      setStreamOffline(true);
+                      setVideoSrc(null);
+                    }
+                    return null;
+                  }
+                }}
+              />
+            )}
 
             <aside className="flex min-w-0 flex-col gap-3" aria-label="Коментарі">
               <h2 className="text-sm font-semibold">Коментарі</h2>

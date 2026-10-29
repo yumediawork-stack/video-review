@@ -60,6 +60,10 @@ export interface VersionInfo {
   uploadedAt: string | null;
   /** Підписана URL (адмін), null для failed/uploading. */
   mediaUrl: string | null;
+  /** Джерело: завантажений файл або live-трансляція з ПК редактора. */
+  mediaSource: 'storage' | 'agent';
+  /** Останній announce агента (для статусу «онлайн») — null для storage. */
+  agentBeat: string | null;
 }
 
 export interface ReviewLinkState {
@@ -71,7 +75,7 @@ export interface ReviewAccess {
   projectTitle: string;
   projectDescription: string | null;
   version: { id: string; number: number; durationSeconds: number | null };
-  video: { url: string; expiresAt: string | null };
+  video: { url: string; expiresAt: string | null; kind: 'storage' | 'agent'; offline: boolean };
   comments: FlatComment[];
   /** Opaque ідентифікатор опублікованої версії — для детекції нової версії. */
   revision: string;
@@ -92,6 +96,7 @@ export type ApiErrorCode =
   | 'no_published_version'
   | 'not_found'
   | 'version_changed'
+  | 'stream_offline'
   | 'too_many_requests'
   | 'internal_error'
   | 'cors_rejected';

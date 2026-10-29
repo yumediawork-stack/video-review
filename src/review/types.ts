@@ -4,7 +4,7 @@ import type { NewReviewCommentPayload, ReviewAccess } from '../lib/types';
 export interface ReviewApi {
   read(token: string): Promise<ReviewAccess>;
   comment(token: string, payload: NewReviewCommentPayload): Promise<FlatCommentLike>;
-  refreshVideoUrl(token: string, versionId: string): Promise<{ url: string; expiresAt: string | null }>;
+  refreshVideoUrl(token: string, versionId: string): Promise<{ url: string; expiresAt: string | null; kind?: 'storage' | 'agent' }>;
 }
 
 /** Мінімальна форма нового коментаря (FlatComment без status/updatedAt спрощень не робимо). */

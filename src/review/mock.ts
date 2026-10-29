@@ -69,7 +69,7 @@ export const mockReviewApi: ReviewApi = {
       projectTitle: project.title,
       projectDescription: project.description,
       version: { id: version.id, number: version.versionNumber, durationSeconds: version.durationSeconds },
-      video: { url: version.mediaUrl, expiresAt: null },
+      video: { url: version.mediaUrl, expiresAt: null, kind: 'storage', offline: false },
       comments,
       revision: version.id,
     });

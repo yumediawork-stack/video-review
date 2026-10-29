@@ -166,6 +166,8 @@ function toVersionInfo(mock: MockVersion, project: MockProject): VersionInfo {
     createdAt: mock.createdAt,
     uploadedAt: mock.uploadedAt,
     mediaUrl: viewable ? mock.mediaUrl : null,
+    mediaSource: 'storage',
+    agentBeat: null,
   };
 }
 
@@ -346,6 +348,19 @@ export const mockAdminApi: AdminDataApi = {
     if (!p) throw new ApiError('not_found', 404, 'Проєкт не знайдено.');
     p.linkActive = false;
     save(s);
+  },
+
+  async getAgentState() {
+    // mock: агент-режим лише у реальному середовищі
+    return { active: false };
+  },
+
+  async createAgentKey() {
+    throw new ApiError('internal_error', 501, 'Трансляція з PC доступна лише у реальному режимі (з Supabase). Завантажте файл або підключіть .env.local.');
+  },
+
+  async revokeAgentKey() {
+    /* noop у mock */
   },
 
   async listAdminComments(_projectId, versionId): Promise<FlatComment[]> {

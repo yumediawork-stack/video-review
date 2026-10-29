@@ -55,7 +55,7 @@ async function getUserToken(): Promise<string | null> {
   return session?.access_token ?? null;
 }
 
-async function mapVersion(row: VersionRow, publishedVersionId: string | null): Promise<VersionInfo> {
+async function mapVersion(row: VersionRow & { media_source?: string | null; agent_updated_at?: string | null }, publishedVersionId: string | null): Promise<VersionInfo> {
   const isPublished = publishedVersionId === row.id;
   const status = isPublished ? ('published' as const) : row.upload_status;
   return {
@@ -70,6 +70,8 @@ async function mapVersion(row: VersionRow, publishedVersionId: string | null): P
     createdAt: row.created_at,
     uploadedAt: row.uploaded_at,
     mediaUrl: null,
+    mediaSource: (row.media_source as 'storage' | 'agent' | undefined) === 'agent' ? 'agent' : 'storage',
+    agentBeat: row.agent_updated_at ?? null,
   };
 }
 
@@ -176,7 +178,7 @@ export const liveAdminApi: AdminDataApi = {
     const publishedVersionId = (project as unknown as ProjectRow).published_version_id;
     const { data: versions, error } = await getSupabase()
       .from('video_versions')
-      .select('id, project_id, version_number, file_name, size_bytes, mime_type, duration_seconds, upload_status, created_at, uploaded_at, storage_path')
+      .select('id, project_id, version_number, file_name, size_bytes, mime_type, duration_seconds, upload_status, created_at, uploaded_at, storage_path, media_source, agent_updated_at, agent_url')
       .eq('project_id', projectId)
       .order('version_number', { ascending: true });
     if (error) throw pgErr(error);
@@ -209,13 +211,18 @@ export const liveAdminApi: AdminDataApi = {
   async getVideoUrl(projectId, versionId) {
     const { data: version, error } = await getSupabase()
       .from('video_versions')
-      .select('storage_path, upload_status')
+      .select('storage_path, upload_status, media_source, agent_url')
       .eq('id', versionId)
       .eq('project_id', projectId)
       .single();
     if (error) throw pgErr(error);
-    const row = version as unknown as { storage_path: string; upload_status: string };
+    const row = version as unknown as { storage_path: string; upload_status: string; media_source?: string | null; agent_url?: string | null };
     if (row.upload_status === 'failed') return null;
+    // агент-версії: URL будується з базового тунеля (без bucket)
+    if (row.media_source === 'agent' && row.agent_url) {
+      const { buildAgentStreamUrl } = await import('../lib/stream');
+      return buildAgentStreamUrl(row.agent_url, versionId);
+    }
     const { data: signed, error: e2 } = await getSupabase()
       .storage.from('review-videos')
       .createSignedUrl(row.storage_path, SIGNED_URL_TTL_SECONDS);
@@ -277,6 +284,47 @@ export const liveAdminApi: AdminDataApi = {
     if (!res.ok) {
       const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
       throw new ApiError('internal_error', res.status, body.error?.message ?? 'Не вдалося відкликати посилання.');
+    }
+  },
+
+  async getAgentState(projectId) {
+    const { data, error } = await getSupabase()
+      .from('agent_links')
+      .select('id, is_active')
+      .eq('project_id', projectId)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (error) throw pgErr(error);
+    const rows = (data as unknown as { is_active: boolean }[]) ?? [];
+    return { active: rows[0]?.is_active === true };
+  },
+
+  async createAgentKey(projectId) {
+    const token = await getUserToken();
+    if (!token) throw new ApiError('internal_error', 401, 'Сесію не знайдено.');
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/rotate-review-link`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ projectId, action: 'create', kind: 'agent' }),
+    });
+    const body = (await res.json().catch(() => ({}))) as { token?: string; error?: { code: ApiErrorCode; message?: string } };
+    if (!res.ok || !body.token) {
+      throw new ApiError(body.error?.code ?? 'internal_error', res.status, body.error?.message ?? 'Не вдалося активувати агент.');
+    }
+    return body.token;
+  },
+
+  async revokeAgentKey(projectId) {
+    const token = await getUserToken();
+    if (!token) throw new ApiError('internal_error', 401, 'Сесію не знайдено.');
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/rotate-review-link`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ projectId, action: 'revoke', kind: 'agent' }),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+      throw new ApiError('internal_error', res.status, body.error?.message ?? 'Не вдалося відкликати агент-ключ.');
     }
   },
 

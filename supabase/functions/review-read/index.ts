@@ -3,18 +3,25 @@
  * Body: { token }
  *
  * Повертає мінімальний набір для review-сторінки: назву/опис проєкту,
- * поточну ОПУБЛІКОВАНУ версію, короткоживучий signed URL, дебліські дерева
- * коментарів (плоский список), opaque revision.
+ * поточну ОПУБЛІКОВАНУ версію, джерело відео, коментарі (плоский список),
+ * opaque revision.
+ *
+ * Джерела відео:
+ *  - storage: короткоживучий signed URL приватного bucket;
+ *  - agent: базовий URL тунеля на ПК редактора (media_source='agent');
+ *    якщо heartbeat агента свіжий → /v/<versionId>.mp4, інакше offline:true
+ *    (коментарі та метадані все одно доступні).
  * Не віддає storage_path, admin-дані, історію версій.
  */
-import { bindCors, json, preflightResponse, resolveCors } from '../_shared/cors.ts';
+import { json, preflightResponse, resolveCors } from '../_shared/cors.ts';
+import { bindCors } from '../_shared/cors.ts';
 import { serviceClient, type CommentRow, type ReviewLinkJoined, type VersionRow } from '../_shared/db.ts';
 import { clientKey, rateLimit } from '../_shared/rate_limit.ts';
 import { hashToken, TOKEN_PATTERN } from '../_shared/tokens.ts';
 import { z } from 'https://esm.sh/zod@3';
 
 const SIGNED_URL_TTL = 7200;
-const DURATION_TOLERANCE = 1.5;
+const AGENT_ONLINE_WINDOW_MS = 120_000; // heartbeat агента раз/хв → 2 хв = офлайн
 
 const bodySchema = z.object({ token: z.string().min(20).max(80) });
 
@@ -22,24 +29,26 @@ function errorRes(status: number, code: string, message: string): Response {
   return json(status, { error: { code, message } });
 }
 
+type MediaOut = {
+  signedUrl: string;
+  expiresAt: string | null;
+  kind: 'storage' | 'agent';
+  offline: boolean;
+};
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     const cors = resolveCors(req);
-  bindCors(cors);
     if (!cors.allowed) return new Response(null, { status: 403 });
     return preflightResponse(cors.headers);
   }
   if (req.method !== 'POST') return errorRes(405, 'invalid_input', 'Метод не підтримується.');
   const cors = resolveCors(req);
-  bindCors(cors);
   if (!cors.allowed) return errorRes(403, 'cors_rejected', 'Origin не дозволено.');
+  bindCors(cors);
 
   let raw: unknown;
-  try {
-    raw = await req.json();
-  } catch {
-    return errorRes(400, 'invalid_input', 'Некоректний JSON.');
-  }
+  try { raw = await req.json(); } catch { return errorRes(400, 'invalid_input', 'Некоректний JSON.'); }
   const parsed = bodySchema.safeParse(raw);
   if (!parsed.success) return errorRes(400, 'invalid_input', 'Некоректний формат запиту.');
   const token = parsed.data.token;
@@ -72,22 +81,37 @@ Deno.serve(async (req) => {
   if (!project.published_version_id) return errorRes(404, 'no_published_version', 'Відео ще не опубліковано.');
   const { data: version } = await service
     .from('video_versions')
-    .select('id, version_number, storage_path, upload_status, duration_seconds')
+    .select('id, version_number, storage_path, upload_status, duration_seconds, media_source, agent_url, agent_updated_at')
     .eq('id', project.published_version_id)
     .maybeSingle();
-  const vrow = version as unknown as VersionRow | null;
+  const vrow = version as unknown as (VersionRow & { media_source: 'storage' | 'agent'; agent_url: string | null; agent_updated_at: string | null }) | null;
   if (!vrow || vrow.upload_status !== 'ready') {
     return errorRes(404, 'no_published_version', 'Відео ще не опубліковано.');
   }
 
-  // 3) короткоживучий signed URL (гість НІКОЛИ не бачить storage_path)
-  const { data: signed, error: signedErr } = await service
-    .storage
-    .from('review-videos')
-    .createSignedUrl(vrow.storage_path, SIGNED_URL_TTL);
-  if (signedErr || !signed) {
-    console.error('signed url error', signedErr?.message);
-    return errorRes(500, 'internal_error', 'Не вдалося підготувати відео.');
+  // 3) джерело відео
+  let media: MediaOut;
+  if (vrow.media_source === 'agent') {
+    const base = (vrow.agent_url ?? '').replace(/\/+$/, '');
+    if (!base) return errorRes(404, 'no_published_version', 'Джерело трансляції не налаштоване.');
+    const heartbeat = vrow.agent_updated_at ? new Date(vrow.agent_updated_at).getTime() : 0;
+    const online = Date.now() - heartbeat < AGENT_ONLINE_WINDOW_MS;
+    media = {
+      signedUrl: online ? `${base}/v/${vrow.id}.mp4` : '',
+      expiresAt: null,
+      kind: 'agent',
+      offline: !online,
+    };
+  } else {
+    const { data: signed, error: signedErr } = await service
+      .storage
+      .from('review-videos')
+      .createSignedUrl(vrow.storage_path, SIGNED_URL_TTL);
+    if (signedErr || !signed) {
+      console.error('signed url error', signedErr?.message);
+      return errorRes(500, 'internal_error', 'Не вдалося підготувати відео.');
+    }
+    media = { signedUrl: signed.signedUrl, expiresAt: new Date(Date.now() + SIGNED_URL_TTL * 1000).toISOString(), kind: 'storage', offline: false };
   }
 
   // 4) коментарі саме цієї версії (видалені — приховані)
@@ -117,7 +141,7 @@ Deno.serve(async (req) => {
   return json(200, {
     project: { title: project.title, description: project.description },
     version: { id: vrow.id, number: vrow.version_number, durationSeconds: vrow.duration_seconds == null ? null : Number(vrow.duration_seconds) },
-    video: { signedUrl: signed.signedUrl, expiresAt: new Date(Date.now() + SIGNED_URL_TTL * 1000).toISOString() },
+    video: { signedUrl: media.signedUrl, expiresAt: media.expiresAt, kind: media.kind, offline: media.offline },
     comments,
     revision: vrow.id,
   });
